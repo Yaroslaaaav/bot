@@ -11,8 +11,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения
-TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN")
-DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY")
+TELEGRAM_BOT_TOKEN: str = os.getenv("7836111015:AAH3qAA-2b44JLUvJzaC5QDx-5ERXP-11AM")
+DEEPSEEK_API_KEY: str = os.getenv("sk-cb4cefac20a54b53a48424583d7678b4")
 
 # Создание Flask-приложения
 app: Flask = Flask(__name__)
