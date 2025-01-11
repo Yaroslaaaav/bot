@@ -1,50 +1,73 @@
 import os
+import logging
+from typing import List, Dict, Any
+from flask import Flask, request, jsonify
+from telegram import Bot, Update
+from telegram.ext import Dispatcher, CommandHandler, MessageHandler, filters
 import requests
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+# Настройка логгирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-DEEPSEEK_API_KEY = "sk-cb4cefac20a54b53a48424583d7678b4"  
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  
-TELEGRAM_BOT_TOKEN = "7836111015:AAH3qAA-2b44JLUvJzaC5QDx-5ERXP-11AM"  
+# Загрузка переменных окружения
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN")
+DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY")
 
+# Создание Flask-приложения
+app: Flask = Flask(__name__)
 
-async def get_deepseek_response(prompt):
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "DeepSeek--chat",  
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=data)
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
-    else:
-        return "Ошибка при запросе к API DeepSeek."
+# Инициализация бота
+bot: Bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dispatcher: Dispatcher = Dispatcher(bot, None, workers=0)
 
+# Обработчик команды /start
+def start(update: Update, context: Any) -> None:
+    update.message.reply_text("Привет! Я твой бот с интеграцией DeepSeek. Используй /search <запрос> для поиска.")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я бот, использующий DeepSeek API. Напиши мне что-нибудь!")
+# Обработчик команды /search
+def search(update: Update, context: Any) -> None:
+    query: str = " ".join(context.args)
+    if not query:
+        update.message.reply_text("Пожалуйста, укажите запрос для поиска.")
+        return
 
+    try:
+        # Запрос к API DeepSeek
+        response: requests.Response = requests.get(
+            "https://api.deepseek.com/v1/search",
+            params={"query": query, "api_key": DEEPSEEK_API_KEY},
+        )
+        results: List[Dict[str, str]] = response.json().get("results", [])
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
-    response = await get_deepseek_response(user_message)
-    await update.message.reply_text(response)
+        if results:
+            # Отправка первых 3 результатов
+            message: str = "\n\n".join(
+                [f"{i + 1}. {result['title']}\n{result['url']}" for i, result in enumerate(results[:3])]
+            )
+            update.message.reply_text(f"Результаты поиска:\n\n{message}")
+        else:
+            update.message.reply_text("По вашему запросу ничего не найдено.")
+    except Exception as e:
+        logger.error(f"Ошибка при запросе к DeepSeek API: {e}")
+        update.message.reply_text("Произошла ошибка при поиске. Попробуйте позже.")
 
+# Обработчик текстовых сообщений
+def echo(update: Update, context: Any) -> None:
+    update.message.reply_text("Я не понимаю эту команду. Попробуй /search <запрос>.")
 
-def main():
-    
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+# Регистрация обработчиков
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("search", search))
+dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# Вебхук для Telegram
+@app.route("/webhook", methods=["POST"])
+def webhook() -> jsonify:
+    update: Update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return jsonify({"status": "ok"})
 
-    
-    application.run_polling()
-
+# Запуск сервера
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 3000)))
